@@ -404,9 +404,14 @@
     </div>
 
     <div class="panel col-6">
-      <h2>Ranking de Talleres</h2>
-      <p class="hint">Los talleres con m&#225;s asistentes (top 12).</p>
-      <ol class="rank" id="rankList"></ol>
+      <div class="panel-head-row">
+        <div>
+          <h2>Ranking de Talleres</h2>
+          <p class="hint" id="hintRank">Los talleres con m&#225;s asistentes (top 10).</p>
+        </div>
+        <button class="toggle-btn" id="btnRank">Ver todas</button>
+      </div>
+      <div id="wrapRank"><ol class="rank" id="rankList"></ol></div>
     </div>
 
     <div class="panel col-6">
@@ -920,11 +925,22 @@ function renderMonthChart(){
   });
 }
 
+let rankVerTodas = false;
 function renderRanking(){
   const list = $("#rankList");
   const talleres = FILTERED.filter(r => clean(r[COL.actividad]).toLowerCase().includes("taller"));
-  const top = topEntries(countBy(talleres, COL.accion), 12);
+  const all = topEntries(countBy(talleres, COL.accion));
+  const top = rankVerTodas ? all : all.slice(0, 10);
   const max = top.length ? top[0][1] : 1;
+  const wrap = $("#wrapRank"), btn = $("#btnRank"), hint = $("#hintRank");
+  if(wrap){
+    if(rankVerTodas){ wrap.style.maxHeight = "440px"; wrap.style.overflowY = "auto"; wrap.style.paddingRight = "6px"; }
+    else { wrap.style.maxHeight = ""; wrap.style.overflowY = ""; wrap.style.paddingRight = ""; }
+  }
+  if(btn) btn.textContent = rankVerTodas ? "Ver top 10" : "Ver todas";
+  if(hint) hint.innerHTML = rankVerTodas
+    ? ("Los talleres con m\u00e1s asistentes (" + fmt(all.length) + " en total \u00b7 desliza para ver m\u00e1s).")
+    : "Los talleres con m\u00e1s asistentes (top 10).";
   if(!top.length){ list.innerHTML='<li class="empty">Sin talleres para los filtros actuales.</li>'; return; }
   list.innerHTML = top.map((e,i)=>{
     const pct = Math.max(3, e[1]/max*100);
@@ -1191,6 +1207,7 @@ $("#btnClear").addEventListener("click", ()=>{
   applyAndRender();
 });
 $("#btnCarreras").addEventListener("click", ()=>{ carreraVerTodas = !carreraVerTodas; renderCarrera(); });
+$("#btnRank").addEventListener("click", ()=>{ rankVerTodas = !rankVerTodas; renderRanking(); });
 $("#btnRefresh").addEventListener("click", loadData);
 $("#btnPDF").addEventListener("click", exportPDF);
 $("#btnXLSX").addEventListener("click", exportXLSX);
