@@ -203,6 +203,13 @@
   }
   .panel h2::before{content:"";width:4px;height:18px;border-radius:3px;background:linear-gradient(180deg,var(--gold),var(--gold-dk));flex:none}
   .panel .hint{font-size:12px;color:var(--muted);margin:0 0 16px;padding-left:15px}
+  .panel-head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .toggle-btn{
+    appearance:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:12px;white-space:nowrap;
+    background:#fff;color:var(--navy);border:1.5px solid var(--line);border-radius:9px;padding:7px 13px;transition:.14s;flex:none;
+  }
+  .toggle-btn:hover{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .toggle-btn:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
   .chart-wrap{position:relative;flex:1;min-height:240px}
   .chart-wrap.tall{min-height:360px}
   .col-12{grid-column:span 12}
@@ -403,9 +410,14 @@
     </div>
 
     <div class="panel col-6">
-      <h2>Participaci&#243;n por carrera</h2>
-      <p class="hint">Carreras de origen de los asistentes (top 10).</p>
-      <div class="chart-wrap tall"><canvas id="chCarrera"></canvas></div>
+      <div class="panel-head-row">
+        <div>
+          <h2>Participaci&#243;n por carrera</h2>
+          <p class="hint" id="hintCarrera">Carreras de origen de los asistentes (top 10).</p>
+        </div>
+        <button class="toggle-btn" id="btnCarreras">Ver todas</button>
+      </div>
+      <div class="chart-wrap tall" id="wrapCarrera"><canvas id="chCarrera"></canvas></div>
     </div>
 
     <div class="panel col-3">
@@ -497,6 +509,31 @@ const $ = s => document.querySelector(s);
 const clean = v => (v==null?"":String(v)).trim().replace(/\s+/g," ");
 const fmt = n => n.toLocaleString("es-CL");
 const cap = s => s ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : s;
+
+/* Formatea nombres de actividades (vienen en MAYUSCULAS y sin tildes) a may/min natural + tildes */
+const PROPER_W = {"ia":"IA","apa":"APA","excel":"Excel","canva":"Canva","linkedin":"LinkedIn","notebooklm":"NotebookLM","o'reilly":"O'Reilly","pdf":"PDF"};
+const ACCENT_W = {
+  "busqueda":"b\u00fasqueda","informacion":"informaci\u00f3n","academicos":"acad\u00e9micos","academico":"acad\u00e9mico",
+  "academica":"acad\u00e9mica","academicas":"acad\u00e9micas","como":"c\u00f3mo","disena":"dise\u00f1a","diseno":"dise\u00f1o",
+  "presentacion":"presentaci\u00f3n","generacion":"generaci\u00f3n","alla":"all\u00e1","mas":"m\u00e1s","induccion":"inducci\u00f3n",
+  "asesoria":"asesor\u00eda","analisis":"an\u00e1lisis","gestion":"gesti\u00f3n","tecnico":"t\u00e9cnico","informatica":"inform\u00e1tica",
+  "logistica":"log\u00edstica","mecanica":"mec\u00e1nica","administracion":"administraci\u00f3n","investigacion":"investigaci\u00f3n",
+  "comunicacion":"comunicaci\u00f3n","organizacion":"organizaci\u00f3n","educacion":"educaci\u00f3n","practico":"pr\u00e1ctico",
+  "practica":"pr\u00e1ctica","bibliografia":"bibliograf\u00eda","catalogo":"cat\u00e1logo","basico":"b\u00e1sico","rapido":"r\u00e1pido"
+};
+function prettyAccion(s){
+  s = clean(s); if(!s) return s;
+  let out = s.split(" ").map(function(w){
+    if(!w) return w;
+    const mt = w.match(/[a-z\u00e0-\u00ff']+/i);
+    if(!mt) return w.toLowerCase();
+    const core = mt[0].toLowerCase();
+    const rep = PROPER_W[core] || ACCENT_W[core] || core;
+    return w.slice(0, mt.index) + rep + w.slice(mt.index + mt[0].length).toLowerCase();
+  }).join(" ");
+  out = out.replace(/(^|:\s+)([a-z\u00e0-\u00ff])/g, function(m,p,c){ return p + c.toUpperCase(); });
+  return out;
+}
 /* RUT: quita puntos, espacios Y guion, en may\u00fascula -> "12.345.678-9" y "123456789" cuentan igual */
 function normRut(r){ return clean(r).toUpperCase().replace(/[.\s-]/g,""); }
 function mesIndex(m){ const i = MESES.indexOf(clean(m).toLowerCase()); return i<0?99:i; }
@@ -834,9 +871,8 @@ function renderCharts(){
   // Ranking acciones formativas
   renderRanking();
 
-  // Carrera top 10
-  const carr = topEntries(countBy(FILTERED, COL.carrera), 10);
-  barH("carr","chCarrera", carr.map(e=>cap(e[0])), carr.map(e=>e[1]), "#0e7c8b", "#19b3c6");
+  // Carrera (top 10 o todas, segun el toggle)
+  renderCarrera();
 
   // Origen: local vs central
   let local=0, central=0;
@@ -892,12 +928,29 @@ function renderRanking(){
   if(!top.length){ list.innerHTML='<li class="empty">Sin talleres para los filtros actuales.</li>'; return; }
   list.innerHTML = top.map((e,i)=>{
     const pct = Math.max(3, e[1]/max*100);
+    const nombre = prettyAccion(e[0]);
     return `<li>
       <span class="n">${i+1}</span>
-      <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span><span class="name" title="${e[0].replace(/"/g,'&quot;')}">${e[0]}</span></span>
+      <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span><span class="name" title="${nombre.replace(/"/g,'&quot;')}">${nombre}</span></span>
       <span class="val">${fmt(e[1])}</span>
     </li>`;
   }).join("");
+}
+
+let carreraVerTodas = false;
+function renderCarrera(){
+  const todas = topEntries(countBy(FILTERED, COL.carrera));           // todas, orden desc
+  const carr = carreraVerTodas ? todas : todas.slice(0, 10);
+  const wrap = $("#wrapCarrera"), btn = $("#btnCarreras"), hint = $("#hintCarrera");
+  if(wrap){
+    if(carreraVerTodas){ wrap.classList.remove("tall"); wrap.style.height = Math.max(360, carr.length*32) + "px"; }
+    else { wrap.classList.add("tall"); wrap.style.height = ""; }
+  }
+  if(btn) btn.textContent = carreraVerTodas ? "Ver top 10" : "Ver todas";
+  if(hint) hint.textContent = carreraVerTodas
+    ? ("Carreras de origen de los asistentes (" + fmt(todas.length) + " en total).")
+    : "Carreras de origen de los asistentes (top 10).";
+  barH("carr","chCarrera", carr.map(e=>cap(e[0])), carr.map(e=>e[1]), "#0e7c8b", "#19b3c6");
 }
 
 /* ====== TABLA DETALLE ====== */
@@ -1125,6 +1178,7 @@ $("#btnClear").addEventListener("click", ()=>{
   FILTER_IDS.forEach(id=>$(id).value="");
   applyAndRender();
 });
+$("#btnCarreras").addEventListener("click", ()=>{ carreraVerTodas = !carreraVerTodas; renderCarrera(); });
 $("#btnRefresh").addEventListener("click", loadData);
 $("#btnPDF").addEventListener("click", exportPDF);
 $("#btnXLSX").addEventListener("click", exportXLSX);
