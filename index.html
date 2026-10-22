@@ -13,6 +13,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --navy-900:#000000;
@@ -195,7 +196,7 @@
   .panel{
     background:linear-gradient(180deg,#ffffff,#fbfcfe);border:1px solid var(--line);
     border-radius:var(--radius);box-shadow:var(--shadow);padding:20px 22px 22px;
-    display:flex;flex-direction:column;min-width:0;
+    display:flex;flex-direction:column;min-width:0;position:relative;
   }
   .panel h2{
     font-size:15.5px;font-weight:900;color:var(--navy);margin:0 0 3px;letter-spacing:-.015em;
@@ -203,7 +204,14 @@
   }
   .panel h2::before{content:"";width:4px;height:18px;border-radius:3px;background:linear-gradient(180deg,var(--gold),var(--gold-dk));flex:none}
   .panel .hint{font-size:12px;color:var(--muted);margin:0 0 16px;padding-left:15px}
-  .panel-head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .panel-head-row{display:flex;align-items:flex-start;justify-content:flex-end;gap:10px}
+  .panel-head-row > :first-child{margin-right:auto}
+  .dl-ctl{display:flex;gap:6px;align-items:center}
+  .dl-ctl.dl-abs{position:absolute;top:16px;right:16px;z-index:3}
+  .dl-btn{appearance:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:10.5px;letter-spacing:.02em;
+    background:#fff;color:var(--navy);border:1.5px solid var(--line);border-radius:7px;padding:4px 9px;transition:.14s}
+  .dl-btn:hover{background:var(--gold);color:var(--navy);border-color:var(--gold)}
+  .dl-btn:focus-visible{outline:2px solid var(--navy);outline-offset:1px}
   .toggle-btn{
     appearance:none;cursor:pointer;font-family:inherit;font-weight:800;font-size:12px;white-space:nowrap;
     background:#fff;color:var(--navy);border:1.5px solid var(--line);border-radius:9px;padding:7px 13px;transition:.14s;flex:none;
@@ -1197,6 +1205,179 @@ function exportPDF(){
   doc.save("reporte_talleres_bibliotecas_duoc"+fileTag()+".pdf");
 }
 
+/* ====== EXPORTACION POR PANEL (cada grafico/seccion) ====== */
+function entriesToRows(map, capLabel){
+  return topEntries(map).map(e=>[ capLabel?cap(e[0]):e[0], e[1] ]);
+}
+function monthRows(){
+  const meses = MESES.filter(m=>RAW.some(r=>clean(r[COL.mes]).toLowerCase()===m));
+  return meses.map(m=>{
+    const rows = FILTERED.filter(r=>clean(r[COL.mes]).toLowerCase()===m);
+    return [ cap(m), rows.length,
+      new Set(rows.map(r=>normRut(r[COL.rut])).filter(Boolean)).size,
+      new Set(rows.map(sessionKey)).size ];
+  });
+}
+function rankingRowsExp(){
+  const t = FILTERED.filter(r=>clean(r[COL.actividad]).toLowerCase().includes("taller"));
+  return topEntries(countBy(t, COL.accion)).map((e,i)=>[ i+1, prettyAccion(e[0]), e[1] ]);
+}
+function origenRowsExp(){
+  let l=0,c=0; FILTERED.forEach(r=>{ (clean(r[COL.codEnvio])===clean(r[COL.codPart]))?l++:c++; });
+  return [["Local (propia sede)", l],["Central / enviada", c]];
+}
+function iaRowsExp(){
+  const s = FILTERED.filter(isIA).length;
+  return [["Taller de IA", s],["Otras actividades", FILTERED.length - s]];
+}
+function detalleRowsExp(){
+  return buildDetailRows().sort((a,b)=>b.asistentes-a.asistentes)
+    .map(r=>[ r.accion, r.tipo, r.sede, r.mes, r.fecha, r.ia?"S\u00ed":"No", r.asistentes ]);
+}
+
+const PANELS = {
+  organizador:{ title:"Participantes por organizador", canvas:"chSede", cols:["Sede (organizador)","Participantes"], rows:()=>entriesToRows(countBy(FILTERED,COL.nomEnvio),false) },
+  origen:     { title:"Participantes por origen", canvas:"chSedePart", cols:["Sede de origen","Participantes"], rows:()=>entriesToRows(countBy(FILTERED,COL.nomPart),false) },
+  tipo:       { title:"Tipo de actividad", canvas:"chActividad", cols:["Tipo de actividad","Participantes"], rows:()=>entriesToRows(countBy(FILTERED,COL.actividad),true) },
+  mensual:    { title:"Evoluci\u00f3n mensual", canvas:"chMes", cols:["Mes","Participaciones","Participantes \u00fanicos","Actividades"], rows:()=>monthRows() },
+  carrera:    { title:"Participaci\u00f3n por carrera", canvas:"chCarrera", cols:["Carrera","Participantes"], rows:()=>entriesToRows(countBy(FILTERED,COL.carrera),true) },
+  ranking:    { title:"Ranking de Talleres", canvas:null, cols:["#","Taller","Asistentes"], rows:()=>rankingRowsExp() },
+  origenAct:  { title:"Origen de la actividad", canvas:"chOrigen", cols:["Origen","Participantes"], rows:()=>origenRowsExp() },
+  jornada:    { title:"Jornada del participante", canvas:"chJornada", cols:["Jornada","Participantes"], rows:()=>entriesToRows(countBy(FILTERED,COL.tipoUsuario),false) },
+  ia:         { title:"Talleres de IA", canvas:"chIA", cols:["Categor\u00eda","Participantes"], rows:()=>iaRowsExp() },
+  detalle:    { title:"Detalle de actividades", canvas:null, cols:["Acci\u00f3n formativa","Tipo","Sede","Mes","Fecha","IA","Asistentes"], rows:()=>detalleRowsExp() }
+};
+
+function downloadBlob(blob, name){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+}
+function safeSheetName(s){ return (s||"Datos").replace(/[\[\]\:\*\?\/\\]/g,"").slice(0,31) || "Datos"; }
+
+/* Excel con estilo (ExcelJS): cabecera negra, acento dorado, filtros y filas alternadas */
+async function exportPanelXLSX(key){
+  const P = PANELS[key]; const data = P.rows();
+  if(!data.length){ alert("No hay datos para exportar con los filtros actuales."); return; }
+  if(typeof ExcelJS === "undefined"){ alert("No se pudo cargar la librer\u00eda de Excel (ExcelJS) desde el CDN. Revisa la conexi\u00f3n."); return; }
+  try{
+    const NAVY="FF161618", GOLD="FFF5A800", WHITE="FFFFFFFF", INK="FF132430", MUT="FF607283", ALT="FFF7F9FC", LINE="FFE6EBF1";
+    const n = P.cols.length;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(safeSheetName(P.title), {views:[{state:"frozen", ySplit:5}]});
+    ws.mergeCells(1,1,1,n);
+    const tc = ws.getCell(1,1); tc.value=P.title;
+    tc.fill={type:"pattern",pattern:"solid",fgColor:{argb:NAVY}};
+    tc.font={color:{argb:WHITE},bold:true,size:14}; tc.alignment={vertical:"middle"}; ws.getRow(1).height=24;
+    ws.getCell(2,1).value="Filtros aplicados:"; ws.getCell(2,1).font={bold:true,color:{argb:MUT}};
+    ws.mergeCells(2,2,2,n); ws.getCell(2,2).value=filtersSummary();
+    ws.getCell(3,1).value="Generado:"; ws.getCell(3,1).font={bold:true,color:{argb:MUT}};
+    ws.mergeCells(3,2,3,n); ws.getCell(3,2).value=new Date().toLocaleString("es-CL");
+    const hr = ws.getRow(5);
+    P.cols.forEach((c,i)=>{
+      const cell=hr.getCell(i+1); cell.value=c;
+      cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:NAVY}};
+      cell.font={color:{argb:WHITE},bold:true,size:11};
+      cell.alignment={horizontal:i===0?"left":"right"};
+      cell.border={bottom:{style:"medium",color:{argb:GOLD}}};
+    });
+    hr.height=18;
+    data.forEach((r,ri)=>{
+      const row=ws.getRow(6+ri);
+      r.forEach((v,ci)=>{
+        const cell=row.getCell(ci+1); cell.value=v;
+        cell.alignment={horizontal:ci===0?"left":"right"};
+        cell.font={color:{argb:INK}, bold: ci===n-1};
+        if(ri%2===1) cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:ALT}};
+        cell.border={bottom:{style:"thin",color:{argb:LINE}}};
+      });
+    });
+    P.cols.forEach((c,i)=>{ ws.getColumn(i+1).width = i===0 ? 44 : 18; });
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "duoc_"+key+fileTag()+".xlsx");
+  }catch(e){ alert("No se pudo generar el Excel: "+(e&&e.message?e.message:e)); }
+}
+
+function pdfColStyles(n, key){
+  const o={};
+  for(let c=1;c<n;c++) o[c]={halign:"right"};
+  if(key==="ranking"){ o[0]={halign:"center",cellWidth:11}; o[2]={halign:"right"}; }
+  if(key==="detalle"){ o[0]={cellWidth:52}; }
+  return o;
+}
+
+/* PDF con la identidad del dashboard: banda negra, acento dorado, filtros, imagen del grafico y tabla */
+function exportPanelPDF(key){
+  const P = PANELS[key]; const data = P.rows();
+  if(!data.length){ alert("No hay datos para exportar con los filtros actuales."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:"mm", format:"a4"}); const W=210, M=14;
+  doc.setFillColor(22,22,24); doc.rect(0,0,W,24,"F");
+  doc.setFillColor(245,168,0); doc.rect(0,24,W,1.8,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(14);
+  doc.text(P.title, M, 12);
+  doc.setFont("helvetica","normal"); doc.setFontSize(9.5);
+  doc.text("Bibliotecas Duoc UC", M, 18.5);
+  let y=33; doc.setTextColor(40,50,60); doc.setFontSize(9);
+  doc.setFont("helvetica","bold"); doc.text("Filtros aplicados:", M, y); doc.setFont("helvetica","normal");
+  const fsx = doc.splitTextToSize(filtersSummary(), W-M-46); doc.text(fsx, M+32, y);
+  y += Math.max(6, fsx.length*4.6)+1;
+  doc.setFontSize(8.5); doc.setTextColor(120,128,138);
+  doc.text("Generado: "+new Date().toLocaleString("es-CL"), M, y); y+=6;
+  const skipImg = (key==="carrera" && carreraVerTodas);
+  if(P.canvas && !skipImg){
+    const cv = document.getElementById(P.canvas);
+    if(cv){ try{
+      const img = cv.toDataURL("image/png",1.0); const ratio = cv.height/cv.width;
+      let w=W-2*M, h=w*ratio; const maxH=96; if(h>maxH){ h=maxH; w=h/ratio; }
+      const x=M+((W-2*M)-w)/2;
+      if(y+h>284){ doc.addPage(); y=16; }
+      doc.addImage(img,"PNG",x,y,w,h); y+=h+6;
+    }catch(e){} }
+  }
+  if(y>270){ doc.addPage(); y=16; }
+  doc.autoTable({
+    startY:y, head:[P.cols], body:data.map(r=>r.map(v=>String(v))),
+    styles:{font:"helvetica", fontSize:8, cellPadding:2, overflow:"linebreak"},
+    headStyles:{fillColor:[22,22,24], textColor:255, lineColor:[245,168,0], lineWidth:0.4},
+    alternateRowStyles:{fillColor:[247,249,252]},
+    columnStyles: pdfColStyles(P.cols.length, key),
+    margin:{left:M, right:M}
+  });
+  const pages = doc.internal.getNumberOfPages();
+  for(let i=1;i<=pages;i++){
+    doc.setPage(i); doc.setTextColor(150,158,168); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text("Bibliotecas Duoc UC - Talleres y Acciones Formativas", M, 292);
+    doc.text("Pagina "+i+" de "+pages, W-M, 292, {align:"right"});
+  }
+  doc.save("duoc_"+key+fileTag()+".pdf");
+}
+
+/* Inyecta los botones PDF/Excel en cada panel */
+const PANEL_BY_ANCHOR = {
+  "chSede":"organizador","chSedePart":"origen","chActividad":"tipo","chMes":"mensual",
+  "chCarrera":"carrera","chOrigen":"origenAct","chJornada":"jornada","chIA":"ia",
+  "rankList":"ranking","detailTable":"detalle"
+};
+function setupExportButtons(){
+  Object.keys(PANEL_BY_ANCHOR).forEach(anchorId=>{
+    const el = document.getElementById(anchorId); if(!el) return;
+    const panel = el.closest(".panel"); if(!panel || panel.querySelector(".dl-ctl")) return;
+    const key = PANEL_BY_ANCHOR[anchorId];
+    const ctl = document.createElement("div"); ctl.className="dl-ctl";
+    ctl.innerHTML = '<button class="dl-btn" data-k="'+key+'" data-type="pdf" title="Descargar PDF de este panel">PDF</button>'
+                  + '<button class="dl-btn" data-k="'+key+'" data-type="xlsx" title="Descargar Excel de este panel">Excel</button>';
+    const headRow = panel.querySelector(".panel-head-row");
+    if(headRow){ headRow.insertBefore(ctl, headRow.querySelector(".toggle-btn")); }
+    else { ctl.classList.add("dl-abs"); panel.appendChild(ctl); }
+  });
+  document.querySelectorAll(".dl-btn").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const k=b.getAttribute("data-k"), t=b.getAttribute("data-type");
+      if(t==="pdf") exportPanelPDF(k); else exportPanelXLSX(k);
+    });
+  });
+}
+
 /* ====== ORQUESTACI\u00d3N ====== */
 function applyAndRender(){ applyFilters(); renderKPIs(); renderCharts(); renderTable(); }
 
@@ -1222,6 +1403,7 @@ document.querySelectorAll("thead th").forEach(th=>{
 });
 
 /* Init */
+setupExportButtons();
 loadData();
 </script>
 </body>
